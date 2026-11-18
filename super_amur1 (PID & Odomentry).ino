@@ -36,6 +36,8 @@ void countLeftPulses();
 void countRightPulses();
 void calculateRightPID(float dt);
 void calculateLeftPID(float dt);
+void updateOdomentry(float dL, float dR);
+void readEncoderMovement();
 
 //enumeration
 enum RobotState{
@@ -71,6 +73,12 @@ bool firstLeftPIDRun = true;
 volatile unsigned long leftPulseCount = 0;
 
 volatile unsigned long rightPulseCount = 0;
+
+volatile long leftEncoderCount = 0;
+volatile long rightEncoderCount = 0;
+
+long prevLeftEncoderCount = 0;
+long prevRightEncoderCount = 0;
 
 const float pulsePerRevolution = 100.0;
 
@@ -108,6 +116,15 @@ unsigned long prevEncTime = 0;
 int basePWM = 120;
 int rightMotorPWM = 0;
 int leftMotorPWM = 0;
+
+float dL = 0.0;
+float dR = 0.0;
+float robotX = 0.0;
+float robotY = 0.0;
+float robotHeading = 0.0;
+
+float wheelCircumference = 11.0;
+float wheelSeparation = 14.0;
 
 //SETUP
 void setup(){
@@ -156,12 +173,16 @@ long getDistance(){
   return duration * 0.034 / 2;
 }
 
-//Pulses
+//Pulses(X4 quadrature decoding)
 void countLeftPulses(){
+	
 	leftPulseCount++;
+	leftEncoderCount++;
 }
 void countRightPulses(){
+	
 	rightPulseCount++;
+	rightEncoderCount++;
 }
 
 //PID calculations
@@ -203,6 +224,72 @@ void calculateRightPID(float dt){
   	rightPIDOutput = P + I + D;
   
   	rightPreviousError = rightError;
+}
+
+//Odometry
+void updateOdomentry(float dL, float dR){
+	//calculating distance
+  	float centerDistance = (dL + dR)/2.0;
+  
+  	//calculating turning
+  	float deltaHeading = (dR - dL)/wheelSeparation;
+  
+  	//calculating average heading 
+  	float midHeading = robotHeading + (deltaHeading / 2.0);
+  
+  	//updating robot position
+  	robotX += centerDistance * cos(midHeading);
+  	robotY += centerDistance * sin(midHeading);
+  
+  	//updating robot direction
+  	robotHeading += deltaHeading;
+  
+  	//Serial
+  	Serial.print("X: ");
+	Serial.println(robotX);
+
+	Serial.print("Y: ");
+	Serial.println(robotY);
+
+	Serial.print("Heading: ");
+	Serial.println(robotHeading);
+}
+
+//Encoder movement
+void readEncoderMovement (){
+	long currentLeftCount;
+  	long currentRightCount;
+  
+  	//Safely count pulses
+  	noInterrupts();
+  
+  	currentLeftCount = leftEncoderCount;
+  	currentRightCount = rightEncoderCount;
+  
+  	interrupts();
+  
+  	//Culculate pulse difference
+ 	long deltaLeft = currentLeftCount - prevLeftEncoderCount;
+  	long deltaRight = currentRightCount - prevRightEncoderCount;
+  
+  	//Reset the previous counts
+  	prevLeftEncoderCount = currentLeftCount;
+  	prevRightEncoderCount = currentRightCount;
+  
+  	//Culculate distance covered by left and right wheels
+  	dL = (deltaLeft / pulsePerRevolution) * wheelCircumference;
+  	dR = (deltaRight / pulsePerRevolution) * wheelCircumference;
+  
+  	float distance =  (dL + dR)/2.0;
+  
+  	Serial.print("Distance: ");
+   	Serial.print(distance);
+    Serial.println(" cm");
+  
+  	//Update Odomentry
+  	updateOdomentry(dL, dR);
+  
+  	
 }
 
 //alarm
@@ -261,6 +348,8 @@ void spinLeft(int speed = 150){
 
 //Brain
 void loop(){
+
+	long count;
 	long dist = getDistance();
   	int gasValue = analogRead(gasPin);
   
@@ -294,7 +383,9 @@ void loop(){
     leftPulseCount = 0;
     rightPulseCount = 0;
     
-    interrupts();
+	count = leftEncoderCount;
+	  
+	interrupts();
     
     //Pulses
     Serial.println("Left pulses:");
@@ -339,6 +430,9 @@ void loop(){
 
     	Serial.print("Right PWM: ");
     	Serial.println(rightMotorPWM);
+
+		readEncoderMovement();
+		
 	}
     
     prevEncTime = currTime;
